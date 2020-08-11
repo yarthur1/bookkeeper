@@ -1269,7 +1269,7 @@ public class Bookie extends BookieCriticalThread {
         if (LOG.isTraceEnabled()) {
             LOG.trace("Adding {}@{}", entryId, ledgerId);
         }
-        getJournal(ledgerId).logAddEntry(entry, ackBeforeSync, cb, ctx);
+        getJournal(ledgerId).logAddEntry(entry, ackBeforeSync, cb, ctx); //唯一的传ackBeforeSync 其他全是false
     }
 
     /**

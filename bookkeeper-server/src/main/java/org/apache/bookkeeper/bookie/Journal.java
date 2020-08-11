@@ -331,7 +331,7 @@ public class Journal extends BookieCriticalThread implements CheckpointSource {
             }
             journalCbQueueSize.dec();
             journalAddEntryStats.registerSuccessfulEvent(MathUtils.elapsedNanos(enqueueTime), TimeUnit.NANOSECONDS);
-            cb.writeComplete(0, ledgerId, entryId, null, ctx);
+            cb.writeComplete(0, ledgerId, entryId, null, ctx);    //写入成功，返回ack
             recycle();
         }
 
@@ -365,19 +365,19 @@ public class Journal extends BookieCriticalThread implements CheckpointSource {
         private long logId;
         private long enqueueTime;
 
-        public int process(boolean shouldForceWrite) throws IOException {
+        public int process(boolean shouldForceWrite) throws IOException {   //如果shouldForceWrite,flush，返回flush entry数
             journalStats.getForceWriteQueueSize().dec();
             journalStats.getFwEnqueueTimeStats()
                 .registerSuccessfulEvent(MathUtils.elapsedNanos(enqueueTime), TimeUnit.NANOSECONDS);
 
-            if (isMarker) {
+            if (isMarker) {     //如果标记了 直接返回0
                 return 0;
             }
 
             try {
                 if (shouldForceWrite) {
                     long startTime = MathUtils.nowInNano();
-                    this.logFile.forceWrite(false);
+                    this.logFile.forceWrite(false);          //forceMetadata为false  flush一次
                     journalStats.getJournalSyncStats()
                         .registerSuccessfulEvent(MathUtils.elapsedNanos(startTime), TimeUnit.NANOSECONDS);
                 }
@@ -387,9 +387,9 @@ public class Journal extends BookieCriticalThread implements CheckpointSource {
                 for (int i = 0; i < forceWriteWaiters.size(); i++) {
                     QueueEntry qe = forceWriteWaiters.get(i);
                     if (qe != null) {
-                        cbThreadPool.execute(qe);
+                        cbThreadPool.execute(qe);  //执行QueueEntry run函数 执行回调然后返回
                     }
-                    journalStats.getJournalCbQueueSize().inc();
+                    journalStats.getJournalCbQueueSize().inc();  //JournalCbQueueSize
                 }
 
                 return forceWriteWaiters.size();
@@ -464,7 +464,7 @@ public class Journal extends BookieCriticalThread implements CheckpointSource {
         // successful force write
         Thread threadToNotifyOnEx;
         // should we group force writes
-        private final boolean enableGroupForceWrites;
+        private final boolean enableGroupForceWrites;  //组提交
         // make flush interval as a parameter
         public ForceWriteThread(Thread threadToNotifyOnEx, boolean enableGroupForceWrites) {
             super("ForceWriteThread");
@@ -496,7 +496,7 @@ public class Journal extends BookieCriticalThread implements CheckpointSource {
                             // if we are going to force write, any request that is already in the
                             // queue will benefit from this force write - post a marker prior to issuing
                             // the flush so until this marker is encountered we can skip the force write
-                            if (enableGroupForceWrites) {
+                            if (enableGroupForceWrites) {            //组提交
                                 forceWriteRequests.put(createForceWriteRequest(req.logFile, 0, 0, null, false, true));
                             }
 
@@ -510,7 +510,7 @@ public class Journal extends BookieCriticalThread implements CheckpointSource {
                             }
                         }
                     }
-                    numReqInLastForceWrite += req.process(shouldForceWrite);
+                    numReqInLastForceWrite += req.process(shouldForceWrite);   //如果shouldForceWrite为false,不会flush，写都会返回ack
 
                     if (enableGroupForceWrites
                             // if its a marker we should switch back to flushing
@@ -609,7 +609,7 @@ public class Journal extends BookieCriticalThread implements CheckpointSource {
     // control PageCache flush interval when syncData disabled to reduce disk io util
     private final long journalPageCacheFlushIntervalMSec;
 
-    // Should data be fsynced on disk before triggering the callback
+    // Should data be fsynced on disk before triggering the callback   ***
     private final boolean syncData;
 
     private final LastLogMark lastLogMark = new LastLogMark(0, 0);
@@ -624,7 +624,7 @@ public class Journal extends BookieCriticalThread implements CheckpointSource {
     private final ExecutorService cbThreadPool;
 
     // journal entry queue to commit
-    final BlockingQueue<QueueEntry> queue;
+    final BlockingQueue<QueueEntry> queue;     //什么时候入队
     final BlockingQueue<ForceWriteRequest> forceWriteRequests;
 
     volatile boolean running = true;
@@ -863,7 +863,7 @@ public class Journal extends BookieCriticalThread implements CheckpointSource {
         entry.retain();
 
         journalStats.getJournalQueueSize().inc();
-        queue.put(QueueEntry.create(
+        queue.put(QueueEntry.create(                //插入数据
                 entry, ackBeforeSync,  ledgerId, entryId, cb, ctx, MathUtils.nowInNano(),
                 journalStats.getJournalAddEntryStats(),
                 journalStats.getJournalQueueSize()));
@@ -922,7 +922,7 @@ public class Journal extends BookieCriticalThread implements CheckpointSource {
 
         BufferedChannel bc = null;
         JournalChannel logFile = null;
-        forceWriteThread.start();
+        forceWriteThread.start();       //*****
         Stopwatch journalCreationWatcher = Stopwatch.createUnstarted();
         Stopwatch journalFlushWatcher = Stopwatch.createUnstarted();
         long batchSize = 0;
@@ -965,17 +965,17 @@ public class Journal extends BookieCriticalThread implements CheckpointSource {
                     }
 
                     if (numEntriesToFlush == 0) {
-                        qe = queue.take();
+                        qe = queue.take();       //取出    Journal Entry to Record.
                         dequeueStartTime = MathUtils.nowInNano();
                         journalStats.getJournalQueueStats()
                             .registerSuccessfulEvent(MathUtils.elapsedNanos(qe.enqueueTime), TimeUnit.NANOSECONDS);
                     } else {
                         long pollWaitTimeNanos = maxGroupWaitInNanos
-                                - MathUtils.elapsedNanos(toFlush.get(0).enqueueTime);
+                                - MathUtils.elapsedNanos(toFlush.get(0).enqueueTime);    //从toflush取出第一个
                         if (flushWhenQueueEmpty || pollWaitTimeNanos < 0) {
                             pollWaitTimeNanos = 0;
                         }
-                        qe = queue.poll(pollWaitTimeNanos, TimeUnit.NANOSECONDS);
+                        qe = queue.poll(pollWaitTimeNanos, TimeUnit.NANOSECONDS);        //从queue取出 等待一段时间，最长等待group超时，没有返回null
                         dequeueStartTime = MathUtils.nowInNano();
 
                         if (qe != null) {
@@ -999,14 +999,14 @@ public class Journal extends BookieCriticalThread implements CheckpointSource {
                             // a) already timeout
                             // b) limit the number of entries to group
                             groupWhenTimeout = false;
-                            shouldFlush = true;
+                            shouldFlush = true;         //flush之前的超时entry
                             journalStats.getFlushMaxWaitCounter().inc();
                         } else if (qe != null
                                 && ((bufferedEntriesThreshold > 0 && toFlush.size() > bufferedEntriesThreshold)
                                 || (bc.position() > lastFlushPosition + bufferedWritesThreshold))) {
                             // 2. If we have buffered more than the buffWriteThreshold or bufferedEntriesThreshold
                             groupWhenTimeout = false;
-                            shouldFlush = true;
+                            shouldFlush = true;        //flush  buffer满了
                             journalStats.getFlushMaxOutstandingBytesCounter().inc();
                         } else if (qe == null && flushWhenQueueEmpty) {
                             // We should get here only if we flushWhenQueueEmpty is true else we would wait
@@ -1024,14 +1024,14 @@ public class Journal extends BookieCriticalThread implements CheckpointSource {
                                 writePaddingBytes(logFile, paddingBuff, journalAlignmentSize);
                             }
                             journalFlushWatcher.reset().start();
-                            bc.flush();
+                            bc.flush();       //Write any data in the buffer to the file  调用fileChannel.write(toWrite) 写pagecache？
 
                             for (int i = 0; i < toFlush.size(); i++) {
                                 QueueEntry entry = toFlush.get(i);
                                 if (entry != null && (!syncData || entry.ackBeforeSync)) {
-                                    toFlush.set(i, null);
+                                    toFlush.set(i, null);  //
                                     numEntriesToFlush--;
-                                    cbThreadPool.execute(entry);
+                                    cbThreadPool.execute(entry);  //执行回调,client收到ack
                                 }
                             }
 
@@ -1122,7 +1122,7 @@ public class Journal extends BookieCriticalThread implements CheckpointSource {
                     qe.entry.release();
                 }
 
-                toFlush.add(qe);
+                toFlush.add(qe);     //qe不为空，先add到toflush,qe置为空，然后进入到qe == null判断
                 numEntriesToFlush++;
                 qe = null;
             }

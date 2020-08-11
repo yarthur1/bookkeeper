@@ -227,7 +227,7 @@ public class BufferedChannel extends BufferedReadChannel implements Closeable {
             }
         }
 
-        fileChannel.force(forceMetadata);
+        fileChannel.force(forceMetadata);  //???
         return positionForceWrite;
     }
 
